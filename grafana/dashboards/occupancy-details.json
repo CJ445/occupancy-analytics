@@ -1,0 +1,55 @@
+{
+    "dashboard": {
+      "id": null,
+      "uid": "example-dashboard",
+      "title": "Occupancy Dashboard",
+      "tags": [],
+      "timezone": "browser",
+      "panels": [
+        {
+          "type": "table",
+          "title": "Area and Location",
+          "targets": [
+            {
+              "rawSql": "SELECT a.name AS area_name, a.description AS area_description, l.name AS location_name, l.address FROM public.area a JOIN public.location l ON a.location_id = l.id;",
+              "format": "table"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Data Source Instances",
+          "targets": [
+            {
+              "rawSql": "SELECT d.name AS ds_instance_name, d.mq_topic FROM public.ds_instance d;",
+              "format": "table"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Cameras",
+          "targets": [
+            {
+              "rawSql": "SELECT c.name AS camera_name, c.stream_url, d.name AS ds_instance_name FROM public.camera c JOIN public.ds_instance d ON c.ds_instance_id = d.id;",
+              "format": "table"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Occupancy Data",
+          "targets": [
+            {
+              "rawSql": "SELECT o.timestamp, o.occupancy_count, c.name AS camera_name FROM public.occupancy o JOIN public.camera c ON o.camera_id = c.id;",
+              "format": "table"
+            }
+          ]
+        }
+      ],
+      "schemaVersion": 26,
+      "version": 1
+    },
+    "overwrite": true
+}
+  

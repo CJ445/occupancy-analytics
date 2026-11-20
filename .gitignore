@@ -1,0 +1,26 @@
+# Video / CCTV recordings - never commit
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.wmv
+*.flv
+*.webm
+*.m4v
+*.mpg
+*.mpeg
+*.ts
+*.h264
+*.h265
+*.264
+*.265
+*.hevc
+*.mjpeg
+*.dav
+recordings/
+videos/
+
+# Local secrets / real stream config
+.env
+*.env
+mediamtx-rtsp-proxy/mediamtx.yml

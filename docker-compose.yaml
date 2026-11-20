@@ -1,0 +1,131 @@
+networks:
+  deepstream-kafka-network:
+    driver: bridge
+
+services:
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    container_name: postgres-container
+    networks:
+      - deepstream-kafka-network
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: kafka_data
+    volumes:
+      - ./postgres/scripts:/scripts
+      - ./postgres/schema:/schema
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kafka_data"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    build:
+      context: ./kafka
+      dockerfile: Dockerfile
+    container_name: kafka_container
+    networks:
+      - deepstream-kafka-network
+    ports:
+      - "9092:9092"
+      - "2181:2181"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: kafka_container
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: "raw-events:1:1,json-encoded-events:1:1"
+    entrypoint: >
+      /bin/bash -c "
+        echo 'Starting ZooKeeper...' && 
+        bin/zookeeper-server-start.sh config/zookeeper.properties & 
+        echo 'Starting Kafka server...' && 
+        bin/kafka-server-start.sh config/server.properties &
+        sleep 20 &&
+        echo 'Creating topic raw-events...' && 
+        bin/kafka-topics.sh --create --topic raw-events --bootstrap-server kafka_container:9092 --partitions 1 --replication-factor 1 &&
+        echo 'Creating topic json-encoded-events...' &&
+        bin/kafka-topics.sh --create --topic json-encoded-events --bootstrap-server kafka_container:9092 --partitions 1 --replication-factor 1 &&
+        sleep 5 &&
+        echo 'Starting Kafka console consumer and producer pipeline...' &&
+        bin/kafka-console-consumer.sh --topic raw-events --from-beginning --bootstrap-server kafka_container:9092 |
+        jq -c '{ \"@timestamp\": .[\"@timestamp\"], occupancy: .analyticsModule.occupancy, source_id: .analyticsModule.source_id, Entry: .analyticsModule.Entry, Exit: .analyticsModule.Exit }' |
+        bin/kafka-console-producer.sh --broker-list kafka_container:9092 --topic json-encoded-events & 
+        tail -f /dev/null"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "sleep 20 && /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1"]
+      interval: 50s
+      timeout: 50s    
+      retries: 5
+
+  deepstream:
+    build:
+      context: ./deepstream
+      dockerfile: Dockerfile
+    container_name: deepstream_container
+    networks:
+      - deepstream-kafka-network
+    runtime: nvidia
+    ports:
+      - "8554:8554"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: kafka_data
+      KAFKA_BROKER: kafka_container:9092
+      TOPIC_NAME: json-encoded-events
+    volumes:
+      - ./deepstream/scripts:/scripts
+      - ./deepstream/configs:/configs
+    entrypoint: >
+      /bin/bash -c "
+        echo 'Starting DeepStream analytics...' &&
+        ./deepstream-test5-analytics -c /opt/nvidia/deepstream/deepstream-7.0/sources/apps/sample_apps/occupancy_analytics/config/dstest_occupancy_analytics.txt &
+        echo 'Starting Kafka consumer for database integration...' &&
+        python3 /opt/nvidia/deepstream/deepstream-7.0/sources/apps/sample_apps/occupancy_analytics/consumer.py &
+        wait"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "pgrep deepstream && pgrep python3"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  grafana:
+    build:
+      context: ./grafana
+      dockerfile: Dockerfile
+    container_name: grafana-container
+    networks:
+      - deepstream-kafka-network
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      deepstream:
+        condition: service_healthy
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana:/scripts
+      - ./grafana/dashboards:/dashboards
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5 
